@@ -35,3 +35,11 @@ env/
 
 # Logs
 *.log
+# Data files — kept private, never pushed to GitHub
+reference_data/*.xlsx
+reference_data/*.xls
+reference_data/*.csv
+watched_folder/*.csv
+watched_folder/*.xlsx
+watched_folder/*.xls
+reports/*.xlsx
