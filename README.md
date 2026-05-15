@@ -1,0 +1,105 @@
+# 🏟 Rodeo Checker — UPRA Fines & Card Verification
+
+Automated weekly tool that cross-references the rodeo entry list against the UPRA card numbers and suspended list, then generates a polished Excel report with all matches, fines owed, and totals.
+
+---
+
+## 📁 Repository Structure
+
+```
+RodeoChecker/
+├── .github/
+│   └── workflows/
+│       └── weekly_report.yml   ← GitHub Actions: runs every Monday 8 AM CT
+├── reference_data/
+│   ├── card_numbers.xlsx       ← UPRA member card list (update occasionally)
+│   └── suspended_list.xlsx     ← UPRA suspended list (update occasionally)
+├── watched_folder/
+│   └── (drop weekly alpha sheet here)
+├── reports/
+│   └── (generated reports saved here)
+├── engine.py                   ← Matching + Excel report logic
+├── RodeoChecker.py             ← Desktop GUI app (Mac/Windows)
+├── run_setup.sh                ← One-time Mac setup script
+└── README.md
+```
+
+---
+
+## ⚡ Two Ways to Run
+
+### Option A — Desktop App (weekly manual use)
+
+Best for running the report yourself with a GUI.
+
+1. **Clone or download** this repo
+2. **Run setup once:**
+   ```bash
+   bash run_setup.sh
+   ```
+   This installs dependencies and creates a **Rodeo Checker** app on your Desktop.
+3. **Every week:**
+   - Drop the new alpha sheet into `watched_folder/`
+   - Double-click **Rodeo Checker** on your Desktop
+   - Click **⚡ RUN REPORT**
+   - The Excel report opens automatically
+
+### Option B — GitHub Actions (run on demand)
+
+The workflow in `.github/workflows/weekly_report.yml` runs **whenever you trigger it** — no fixed schedule.
+
+**Setup (one time):**
+1. Push this repo to GitHub (keep it private for sensitive data)
+2. Make sure the two reference files are committed in `reference_data/`
+
+**Each time you need a report:**
+1. Commit the new alpha sheet to `watched_folder/`
+2. Go to **Actions → Weekly Rodeo Report → Run workflow → Run workflow**
+3. The report is saved to `reports/` and appears as a downloadable **Artifact**
+
+---
+
+## 📊 Report Contents
+
+The generated `Fines_Card_Verification_YYYY-MM-DD.xlsx` has three sheets:
+
+| Sheet | Contents |
+|-------|----------|
+| ⚑ Summary | Stat boxes (entrants, flagged, suspended, total $) + full flagged table |
+| 📋 All Matches | Every card number and suspension match with offense and amount |
+| ✅ Fine Totals | Fines only — one row per offense, subtotal per person, grand total |
+
+### Color Coding
+- 🔴 **Red rows** — Person matched on the Suspended List (fines owed)
+- 🟡 **Amber rows** — Person matched on Card Numbers list only
+- 🟦 **Navy bars** — Subtotal per person / Grand total row
+- 🟢 **Green cell** — Dollar total
+
+---
+
+## 🔄 Updating Reference Files
+
+The card numbers and suspended list only change occasionally.
+
+**Via Desktop App:** Click the **Update…** button next to the file in the app.
+
+**Via GitHub:** Replace the file in `reference_data/` and commit/push.
+
+---
+
+## 🛠 Requirements
+
+- Python 3.10+
+- `pandas`
+- `openpyxl`
+
+Install manually:
+```bash
+pip install pandas openpyxl
+```
+
+---
+
+## 🔒 Privacy Note
+
+This repo should be set to **Private** on GitHub since it contains contestant names and financial data.
