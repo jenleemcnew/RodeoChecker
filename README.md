@@ -1,4 +1,4 @@
-# 🏟 Rodeo Checker — UPRA Fines & Card Verification
+# 🏟 Rodeo Checker — Contestant Fines & Card Verification
 
 Automated weekly tool that cross-references the rodeo entry list against the UPRA card numbers and suspended list, then generates a polished Excel report with all matches, fines owed, and totals.
 
