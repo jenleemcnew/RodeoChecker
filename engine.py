@@ -1,6 +1,12 @@
 """
 engine.py  –  Rodeo Checker core matching engine
 Produces the Fines_Card_Verification report.
+
+Sheets:
+  ⚑ Summary           – stat boxes + full flagged persons table
+  ✅ Entries With Cards  – every alpha-sheet name that has a card number
+  ❌ Entries Without Cards – every alpha-sheet name with no card number
+  💰 Fine Totals       – every fine from the suspended list, per person
 """
 
 import re
@@ -10,6 +16,7 @@ from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 from datetime import date
+from collections import OrderedDict
 import os
 
 
@@ -31,11 +38,32 @@ def make_key(last, first) -> str:
 # ── File parsers ──────────────────────────────────────────────────────────────
 
 def load_alpha_sheet(path: str) -> pd.DataFrame:
+    import csv as _csv
     ext = os.path.splitext(path)[1].lower()
     if ext == ".csv":
-        df = pd.read_csv(path, on_bad_lines="skip", encoding="utf-8-sig")
+        # Use Python csv reader so variable-length TeamRoping rows (which carry
+        # heeler name in cols 7-8 beyond the 7-col header) are not dropped.
+        with open(path, newline="", encoding="utf-8-sig") as fh:
+            reader = _csv.reader(fh)
+            raw_rows = [r for r in reader]
+        if not raw_rows:
+            return pd.DataFrame()
+        header = raw_rows[0]
+        records = []
+        for row in raw_rows[1:]:
+            # Skip blank rows and rows containing only NUL/whitespace bytes
+            printable = [c for c in row if c.strip() and all(ord(ch) >= 32 for ch in c)]
+            if not printable:
+                continue
+            rec = {header[i]: row[i] for i in range(min(len(header), len(row)))}
+            rec["_pos7"] = row[7] if len(row) > 7 else ""
+            rec["_pos8"] = row[8] if len(row) > 8 else ""
+            records.append(rec)
+        df = pd.DataFrame(records)
     else:
         df = pd.read_excel(path)
+        df["_pos7"] = ""
+        df["_pos8"] = ""
 
     col_map = {}
     for c in df.columns:
@@ -55,13 +83,33 @@ def load_alpha_sheet(path: str) -> pd.DataFrame:
         first = _norm(str(r.get(col_map.get("first", "Rider First Name"), "")))
         if not last:
             continue
+        cls        = str(r.get(col_map.get("class", "Class Name"), "")).strip()
+        entry_time = str(r.get(col_map.get("time",  "Entry Time"),  "")).strip()
+        is_tr      = "teamroping" in cls.lower().replace(" ", "")
+
         rows.append({
             "key":        make_key(last, first),
             "last":       last,
             "first":      first,
-            "class_name": str(r.get(col_map.get("class", "Class Name"), "")).strip(),
-            "entry_time": str(r.get(col_map.get("time",  "Entry Time"),  "")).strip(),
+            "class_name": cls,
+            "entry_time": entry_time,
+            "role":       "Header" if is_tr else "",
         })
+
+        # For TeamRoping rows, also add the heeler from the extra positional columns
+        if is_tr:
+            h_last  = _norm(str(r.get("_pos7", "")))
+            h_first = _norm(str(r.get("_pos8", "")))
+            if h_last and h_last not in ("NAN", ""):
+                rows.append({
+                    "key":        make_key(h_last, h_first),
+                    "last":       h_last,
+                    "first":      h_first,
+                    "class_name": cls,
+                    "entry_time": entry_time,
+                    "role":       "Heeler",
+                })
+
     return pd.DataFrame(rows)
 
 
@@ -150,38 +198,39 @@ def run_match(alpha_path: str, card_path: str, susp_path: str):
     cards     = load_card_numbers(card_path)
     suspended = load_suspended(susp_path)
 
-    person_map = {}
+    # ── Build per-person records for everyone on the alpha sheet ──────────────
+    # Key: (last, first) -> record
+    person_map = OrderedDict()
 
     for _, rider in alpha.iterrows():
         k     = rider["key"]
         last  = rider["last"]
         first = rider["first"]
         cls   = rider["class_name"]
-
-        card_hits = cards.get(k, [])
-        susp_hits = suspended.get(k, [])
-        if not card_hits and not susp_hits:
-            continue
+        role  = rider.get("role", "")
 
         if k not in person_map:
             person_map[k] = {
-                "last": last, "first": first,
-                "classes": set(),
+                "last":         last,
+                "first":        first,
+                "classes":      set(),
                 "card_entries": [],
                 "susp_entries": [],
                 "on_card_list": False,
                 "on_susp_list": False,
             }
 
-        person_map[k]["classes"].add(cls)
+        # Store class with role suffix for TeamRoping participants
+        cls_label = f"{cls} ({role})" if role else cls
+        person_map[k]["classes"].add(cls_label)
 
-        for ch in card_hits:
+        for ch in cards.get(k, []):
             person_map[k]["on_card_list"] = True
             entry = {k2: ch[k2] for k2 in ("card_number","events","city","state")}
             if entry not in person_map[k]["card_entries"]:
                 person_map[k]["card_entries"].append(entry)
 
-        for sh in susp_hits:
+        for sh in suspended.get(k, []):
             person_map[k]["on_susp_list"] = True
             person_map[k]["susp_entries"].append({
                 "offense": sh["offense"],
@@ -189,93 +238,32 @@ def run_match(alpha_path: str, card_path: str, susp_path: str):
                 "event":   sh["event"],
             })
 
-    detail_rows = []
-    src_order = {"Card Numbers": 0, "Suspended List": 1}
+    # ── Split into with-card and without-card lists ───────────────────────────
+    with_card    = {k: p for k, p in person_map.items() if p["on_card_list"]}
+    without_card = {k: p for k, p in person_map.items() if not p["on_card_list"]}
 
-    for k, p in person_map.items():
-        last   = p["last"]
-        first  = p["first"]
-        classes = ", ".join(sorted(p["classes"]))
-        all_cards_str = ", ".join(e["card_number"] for e in p["card_entries"]) or "—"
+    # ── Fine totals: ALL suspended matches from alpha sheet ───────────────────
+    fines_persons = {k: p for k, p in person_map.items() if p["on_susp_list"]}
 
-        for ce in p["card_entries"]:
-            detail_rows.append({
-                "last": last, "first": first, "classes": classes,
-                "source":      "Card Numbers",
-                "card_number": ce["card_number"],
-                "all_cards":   all_cards_str,
-                "offense":     f"UPRA Member – Events: {ce['events']}",
-                "event":       f"{ce['city']}, {ce['state']}".strip(", "),
-                "amount":      0.0,
-                "on_susp":     p["on_susp_list"],
-            })
-
-        for se in p["susp_entries"]:
-            detail_rows.append({
-                "last": last, "first": first, "classes": classes,
-                "source":      "Suspended List",
-                "card_number": all_cards_str,
-                "all_cards":   all_cards_str,
-                "offense":     se["offense"],
-                "event":       se["event"],
-                "amount":      se["amount"],
-                "on_susp":     True,
-            })
-
-    detail_rows.sort(key=lambda r: (r["last"], r["first"],
-                                    src_order.get(r["source"], 9)))
-
-    totals_rows = []
-    for k, p in person_map.items():
-        susp_total   = sum(e["amount"]  for e in p["susp_entries"])
-        offenses_str = " | ".join(e["offense"] for e in p["susp_entries"]) or "—"
-        found_on     = " + ".join(filter(None, [
-            "Card #"    if p["on_card_list"] else "",
-            "Suspended" if p["on_susp_list"] else "",
-        ]))
-        classes = ", ".join(sorted(p["classes"]))
-
-        if p["card_entries"]:
-            for idx, ce in enumerate(p["card_entries"]):
-                totals_rows.append({
-                    "last":         p["last"],
-                    "first":        p["first"],
-                    "classes":      classes,
-                    "found_on":     found_on,
-                    "card_number":  ce["card_number"],
-                    "card_events":  ce["events"],
-                    "offenses":     offenses_str,
-                    "susp_total":   susp_total,
-                    "on_susp":      p["on_susp_list"],
-                    "_first":       (idx == 0),
-                })
-        else:
-            totals_rows.append({
-                "last":         p["last"],
-                "first":        p["first"],
-                "classes":      classes,
-                "found_on":     found_on,
-                "card_number":  "—",
-                "card_events":  "—",
-                "offenses":     offenses_str,
-                "susp_total":   susp_total,
-                "on_susp":      p["on_susp_list"],
-                "_first":       True,
-            })
-
-    totals_rows.sort(key=lambda x: (-x["susp_total"], x["last"], x["first"], x["card_number"]))
+    # ── Summary flagged = anyone on either reference list ────────────────────
+    flagged = {k: p for k, p in person_map.items()
+               if p["on_card_list"] or p["on_susp_list"]}
 
     stats = {
         "total_entrants":   len(alpha),
-        "flagged_names":    len(person_map),
-        "susp_matches":     sum(1 for p in person_map.values() if p["on_susp_list"]),
-        "card_matches":     sum(1 for p in person_map.values() if p["on_card_list"]),
-        "total_owed":       sum(sum(e["amount"] for e in p["susp_entries"])
-                                for p in person_map.values()),
-        "total_violations": sum(len(p["susp_entries"]) for p in person_map.values()),
+        "total_unique":     len(set(person_map.keys())),
+        "with_card":        len(with_card),
+        "without_card":     len(without_card),
+        "susp_matches":     len(fines_persons),
+        "total_owed":       sum(
+                                sum(e["amount"] for e in p["susp_entries"])
+                                for p in fines_persons.values()
+                            ),
+        "total_violations": sum(len(p["susp_entries"]) for p in fines_persons.values()),
+        "flagged_names":    len(flagged),
     }
 
-    return detail_rows, totals_rows, stats
+    return person_map, with_card, without_card, fines_persons, flagged, stats
 
 
 # ── Style helpers ─────────────────────────────────────────────────────────────
@@ -283,17 +271,17 @@ def run_match(alpha_path: str, card_path: str, susp_path: str):
 NAVY  = "1C2B4A"; RED   = "B91C1C"; RED_L  = "FEE2E2"
 AMBER = "D97706"; AMB_L = "FEF3C7"; GREEN  = "166534"
 GRN_L = "DCFCE7"; SLATE = "475569"; WHITE  = "FFFFFF"
-LGREY = "F8FAFC"
+LGREY = "F8FAFC"; BLUE_L = "EFF6FF"; BLUE  = "1D4ED8"
 
 def _bd():
     s = Side(style="thin", color="CBD5E1")
     return Border(left=s, right=s, top=s, bottom=s)
 
-def _hdr(ws, row, col, val, bg=NAVY, fg=WHITE, sz=10, bold=True, align="center"):
+def _hdr(ws, row, col, val, bg=NAVY, fg=WHITE, sz=10, bold=True, align="center", wrap=True):
     c = ws.cell(row=row, column=col, value=val)
     c.font = Font(name="Georgia", bold=bold, color=fg, size=sz)
     c.fill = PatternFill("solid", start_color=bg)
-    c.alignment = Alignment(horizontal=align, vertical="center", wrap_text=True)
+    c.alignment = Alignment(horizontal=align, vertical="center", wrap_text=wrap)
     c.border = _bd()
 
 def _cell(ws, row, col, val, bg=WHITE, bold=False, fmt=None, align="left", fg="000000"):
@@ -305,9 +293,6 @@ def _cell(ws, row, col, val, bg=WHITE, bold=False, fmt=None, align="left", fg="0
     if fmt:
         c.number_format = fmt
 
-
-# ── Excel builder ─────────────────────────────────────────────────────────────
-
 def _row_height(texts, col_widths, base=15):
     max_lines = 1
     for text, width in zip(texts, col_widths):
@@ -318,8 +303,19 @@ def _row_height(texts, col_widths, base=15):
         max_lines = max(max_lines, lines)
     return max(base, max_lines * 15)
 
+def _sheet_title(ws, title_date, ncols):
+    ws.merge_cells(f"A1:{get_column_letter(ncols)}1")
+    ws.row_dimensions[1].height = 30
+    c = ws["A1"]
+    c.value = title_date
+    c.font  = Font(name="Georgia", bold=True, size=13, color=WHITE)
+    c.fill  = PatternFill("solid", start_color=NAVY)
+    c.alignment = Alignment(horizontal="center", vertical="center")
 
-def build_excel(detail_rows, totals_rows, stats, out_path):
+
+# ── Excel builder ─────────────────────────────────────────────────────────────
+
+def build_excel(person_map, with_card, without_card, fines_persons, flagged, stats, out_path):
     today_str  = date.today().strftime("%m/%d/%y")
     title_date = f"Fines & Card Verification  {today_str}"
     wb = Workbook()
@@ -332,7 +328,7 @@ def build_excel(detail_rows, totals_rows, stats, out_path):
     ws.sheet_view.showGridLines = False
     ws.freeze_panes = "A6"
 
-    ws.merge_cells("A1:G1")
+    ws.merge_cells("A1:F1")
     ws.row_dimensions[1].height = 48
     c = ws["A1"]
     c.value = title_date.upper()
@@ -341,244 +337,305 @@ def build_excel(detail_rows, totals_rows, stats, out_path):
     c.alignment = Alignment(horizontal="center", vertical="center")
 
     ws.row_dimensions[2].height = 6
-    ws.row_dimensions[3].height = 36
-    ws.row_dimensions[4].height = 20
+    ws.row_dimensions[3].height = 42
+    ws.row_dimensions[4].height = 22
     ws.row_dimensions[5].height = 8
 
-    for i, (label, val, bg, fg) in enumerate([
-        ("ENTRANTS",       stats["total_entrants"],   NAVY,  WHITE),
-        ("FLAGGED",        stats["flagged_names"],     RED,   WHITE),
-        ("SUSPENDED",      stats["susp_matches"],      RED,   WHITE),
-        ("CARD # MATCHES", stats["card_matches"],      AMBER, WHITE),
-        ("VIOLATIONS",     stats["total_violations"],  SLATE, WHITE),
-        ("TOTAL $ OWED",   f"${stats['total_owed']:,.2f}", GREEN, WHITE),
-    ], 1):
-        _hdr(ws, 3, i, val,   bg=bg, fg=fg, sz=20, bold=True)
-        _hdr(ws, 4, i, label, bg=bg, fg=fg, sz=8,  bold=False)
-        ws.column_dimensions[get_column_letter(i)].width = 18
+    stat_boxes = [
+        ("ENTRANTS",       stats["total_entrants"],              NAVY,  WHITE),
+        ("FLAGGED",        stats["flagged_names"],                RED,   WHITE),
+        ("SUSPENDED",      stats["susp_matches"],                 RED,   WHITE),
+        ("WITH CARD #",    stats["with_card"],                    BLUE,  WHITE),
+        ("WITHOUT CARD",   stats["without_card"],                 SLATE, WHITE),
+        ("TOTAL $ OWED",   f"${stats['total_owed']:,.2f}",        GREEN, WHITE),
+    ]
+    for i, (label, val, bg, fg) in enumerate(stat_boxes, 1):
+        _hdr(ws, 3, i, val,   bg=bg, fg=fg, sz=20, bold=True,  wrap=False)
+        _hdr(ws, 4, i, label, bg=bg, fg=fg, sz=8,  bold=False, wrap=False)
+        ws.column_dimensions[get_column_letter(i)].width = 22
 
+    # Header row
     r = 6
     ws.row_dimensions[r].height = 22
-    col_w1 = [22, 22, 14, 12, 14, 40, 14]
-    for ci, h in enumerate(["NAME","CLASSES ENTERED","FOUND ON",
-                             "CARD #(s)","CARD EVENTS","OFFENSES","TOTAL OWED"], 1):
+    col_w = [24, 22, 28, 14, 14, 16]
+    for ci, h in enumerate(["NAME","CLASSES ENTERED","OFFENSES/FINES",
+                             "CARD #(s)","CARD EVENTS","TOTAL OWED"], 1):
         _hdr(ws, r, ci, h, bg=SLATE)
-        ws.column_dimensions[get_column_letter(ci)].width = col_w1[ci-1]
+        ws.column_dimensions[get_column_letter(ci)].width = col_w[ci-1]
 
+    # Fit to page width
+    ws.page_setup.fitToPage = True
+    ws.page_setup.fitToWidth = 1
+    ws.page_setup.fitToHeight = 0
+    ws.sheet_properties.pageSetUpPr.fitToPage = True
+
+    # One row per unique flagged person
     seen = set()
-    for row in totals_rows:
-        pk = (row["last"], row["first"])
+    for k, p in sorted(flagged.items(), key=lambda x: (x[1]["last"], x[1]["first"])):
+        pk = (p["last"], p["first"])
         if pk in seen:
             continue
         seen.add(pk)
 
-        all_c  = ", ".join(t["card_number"] for t in totals_rows
-                           if (t["last"],t["first"])==pk and t["card_number"] != "—")
+        all_c  = ", ".join(e["card_number"] for e in p["card_entries"]) or "—"
         all_ev = ", ".join(dict.fromkeys(
-                     t["card_events"] for t in totals_rows
-                     if (t["last"],t["first"])==pk and t["card_events"] not in ("—","")
-                 ))
-        has_fine = row["susp_total"] > 0
+                     e["events"] for e in p["card_entries"] if e["events"]
+                 )) or "—"
+        classes   = ", ".join(sorted(p["classes"]))
+        offenses  = " | ".join(e["offense"] for e in p["susp_entries"]) or "—"
+        susp_total = sum(e["amount"] for e in p["susp_entries"])
+        found_on  = " + ".join(filter(None, [
+            "Card #"    if p["on_card_list"] else "",
+            "Suspended" if p["on_susp_list"] else "",
+        ]))
+
+        bg = RED_L if p["on_susp_list"] else (BLUE_L if p["on_card_list"] else AMB_L)
 
         r += 1
-        bg = RED_L if row["on_susp"] else AMB_L
-
-        _cell(ws, r, 1, f"{row['last']}, {row['first']}", bg=bg, bold=True)
-        _cell(ws, r, 2, row["classes"],        bg=bg)
-        _cell(ws, r, 3, row["found_on"],       bg=bg, bold=True, align="center")
-        _cell(ws, r, 4, all_c  or "—",        bg=bg, align="center")
-        _cell(ws, r, 5, all_ev or "—",        bg=bg)
-        _cell(ws, r, 6, row["offenses"] if row["on_susp"] else "—", bg=bg)
-        if has_fine:
-            _cell(ws, r, 7, row["susp_total"], bg=bg, bold=True,
+        _cell(ws, r, 1, f"{p['last']}, {p['first']}", bg=bg, bold=True)
+        _cell(ws, r, 2, classes,   bg=bg)
+        _cell(ws, r, 3, offenses,  bg=bg)
+        _cell(ws, r, 4, all_c,     bg=bg, align="center")
+        _cell(ws, r, 5, all_ev,    bg=bg)
+        if susp_total > 0:
+            _cell(ws, r, 6, susp_total, bg=bg, bold=True,
                   fmt='"$"#,##0.00', align="right", fg=RED)
         else:
-            _cell(ws, r, 7, "", bg=bg)
-
+            _cell(ws, r, 6, "", bg=bg)
         ws.row_dimensions[r].height = _row_height(
-            [f"{row['last']}, {row['first']}", row["classes"], row["found_on"],
-             all_c, all_ev, row["offenses"], ""],
-            col_w1)
+            [f"{p['last']}, {p['first']}", classes, offenses, all_c, all_ev, ""],
+            col_w)
 
+    # Grand total
     r += 1
-    ws.merge_cells(f"A{r}:F{r}")
+    _cell(ws, r, 6, f"=SUM(F7:F{r-1})", bg=GRN_L, bold=True,
+          fmt='"$"#,##0.00', align="right", fg=GREEN)
+    ws.merge_cells(f"A{r}:E{r}")
     gt = ws.cell(row=r, column=1, value="GRAND TOTAL")
     gt.font  = Font(name="Georgia", bold=True, size=11, color=WHITE)
     gt.fill  = PatternFill("solid", start_color=NAVY)
     gt.alignment = Alignment(horizontal="center", vertical="center")
     gt.border = _bd()
-    _cell(ws, r, 7, f"=SUM(G7:G{r-1})", bg=GRN_L, bold=True,
-          fmt='"$"#,##0.00', align="right", fg=GREEN)
 
     # ══════════════════════════════════════════════════════════════════════════
-    # SHEET 2 — All Match Details
+    # SHEET 2 — Entries With Cards
+    # Every alpha-sheet name that matched a card number, A-Z
+    # Red-tint rows if also suspended
     # ══════════════════════════════════════════════════════════════════════════
-    ws2 = wb.create_sheet("📋 All Matches")
+    ws2 = wb.create_sheet("✅ Entries With Cards")
     ws2.sheet_view.showGridLines = False
     ws2.freeze_panes = "A3"
 
-    ws2.merge_cells("A1:H1")
-    ws2.row_dimensions[1].height = 30
-    c2 = ws2["A1"]
-    c2.value = title_date
-    c2.font  = Font(name="Georgia", bold=True, size=13, color=WHITE)
-    c2.fill  = PatternFill("solid", start_color=NAVY)
-    c2.alignment = Alignment(horizontal="center", vertical="center")
+    _sheet_title(ws2, title_date, 7)
 
-    hdrs2_w = list(zip(
-        ["LAST NAME","FIRST NAME","CLASSES ENTERED","MATCHED LIST",
-         "CARD #","ALL CARD #(s)","OFFENSE / DESCRIPTION","AMOUNT OWED"],
-        [16, 14, 22, 16, 10, 16, 46, 14]
+    hdrs2 = list(zip(
+        ["LAST NAME","FIRST NAME","CLASSES ENTERED",
+         "CARD #(s)","CARD EVENTS","SUSPENDED?","FINES OWED"],
+        [18, 16, 24, 14, 16, 14, 14]
     ))
-    for ci, (h, w) in enumerate(hdrs2_w, 1):
+    for ci, (h, w) in enumerate(hdrs2, 1):
         _hdr(ws2, 2, ci, h, bg=SLATE)
         ws2.column_dimensions[get_column_letter(ci)].width = w
 
-    prev2 = None
-    for ri, row in enumerate(detail_rows):
-        r2 = ri + 3
-        is_susp = row["source"] == "Suspended List"
-        bg   = RED_L if is_susp else AMB_L
-        nm   = (row["last"], row["first"])
-        show = nm != prev2
-        _cell(ws2, r2, 1, row["last"]    if show else "", bg=bg, bold=show)
-        _cell(ws2, r2, 2, row["first"]   if show else "", bg=bg, bold=show)
-        _cell(ws2, r2, 3, row["classes"] if show else "", bg=bg)
-        _cell(ws2, r2, 4, row["source"],      bg=bg, bold=True, align="center",
-              fg=RED if is_susp else AMBER)
-        _cell(ws2, r2, 5, row["card_number"], bg=bg, bold=True, align="center")
-        _cell(ws2, r2, 6, row["all_cards"],   bg=bg, align="center")
-        _cell(ws2, r2, 7, row["offense"],     bg=bg)
-        _cell(ws2, r2, 8,
-              row["amount"] if row["amount"] else "",
-              bg=bg, fmt='"$"#,##0.00' if row["amount"] else None,
-              align="right", fg=RED if row["amount"]>0 else "000000")
+    r2 = 2
+    for k, p in sorted(with_card.items(), key=lambda x: (x[1]["last"], x[1]["first"])):
+        r2 += 1
+        classes   = ", ".join(sorted(p["classes"]))
+        all_c     = ", ".join(e["card_number"] for e in p["card_entries"])
+        all_ev    = ", ".join(dict.fromkeys(e["events"] for e in p["card_entries"] if e["events"])) or "—"
+        susp_total = sum(e["amount"] for e in p["susp_entries"])
+        is_susp   = p["on_susp_list"]
+        bg = RED_L if is_susp else BLUE_L
+
+        _cell(ws2, r2, 1, p["last"],    bg=bg, bold=True)
+        _cell(ws2, r2, 2, p["first"],   bg=bg, bold=True)
+        _cell(ws2, r2, 3, classes,      bg=bg)
+        _cell(ws2, r2, 4, all_c,        bg=bg, bold=True, align="center")
+        _cell(ws2, r2, 5, all_ev,       bg=bg)
+        _cell(ws2, r2, 6, "YES" if is_susp else "No",
+              bg=bg, bold=is_susp, align="center",
+              fg=RED if is_susp else GREEN)
+        if susp_total > 0:
+            _cell(ws2, r2, 7, susp_total, bg=bg, bold=True,
+                  fmt='"$"#,##0.00', align="right", fg=RED)
+        else:
+            _cell(ws2, r2, 7, "", bg=bg)
         ws2.row_dimensions[r2].height = _row_height(
-            ["","", row["classes"], row["source"],
-             row["card_number"], row["all_cards"], row["offense"], ""],
-            [w for _,w in hdrs2_w])
-        prev2 = nm
+            [p["last"], p["first"], classes, all_c, all_ev, "", ""],
+            [w for _, w in hdrs2])
+
+    # Total row
+    r2 += 1
+    ws2.merge_cells(f"A{r2}:F{r2}")
+    gt2 = ws2.cell(row=r2, column=1, value=f"TOTAL WITH CARD  —  {len(with_card)} entries")
+    gt2.font  = Font(name="Georgia", bold=True, size=10, color=WHITE)
+    gt2.fill  = PatternFill("solid", start_color=NAVY)
+    gt2.alignment = Alignment(horizontal="center", vertical="center")
+    gt2.border = _bd()
+    _cell(ws2, r2, 7, f"=SUM(G3:G{r2-1})", bg=GRN_L, bold=True,
+          fmt='"$"#,##0.00', align="right", fg=GREEN)
 
     # ══════════════════════════════════════════════════════════════════════════
-    # SHEET 3 — Fine Totals
+    # SHEET 3 — Entries Without Cards
+    # Every alpha-sheet name with NO card number match, A-Z
+    # Red-tint if suspended
     # ══════════════════════════════════════════════════════════════════════════
-    ws3 = wb.create_sheet("✅ Fine Totals")
+    ws3 = wb.create_sheet("❌ Entries Without Cards")
     ws3.sheet_view.showGridLines = False
     ws3.freeze_panes = "A3"
 
-    ws3.merge_cells("A1:G1")
-    ws3.row_dimensions[1].height = 30
-    c3 = ws3["A1"]
-    c3.value = title_date
-    c3.font  = Font(name="Georgia", bold=True, size=13, color=WHITE)
-    c3.fill  = PatternFill("solid", start_color=NAVY)
-    c3.alignment = Alignment(horizontal="center", vertical="center")
+    _sheet_title(ws3, title_date, 5)
 
-    hdrs3_w = list(zip(
+    hdrs3 = list(zip(
+        ["LAST NAME","FIRST NAME","CLASSES ENTERED","SUSPENDED?","FINES OWED"],
+        [18, 16, 30, 14, 14]
+    ))
+    for ci, (h, w) in enumerate(hdrs3, 1):
+        _hdr(ws3, 2, ci, h, bg=SLATE)
+        ws3.column_dimensions[get_column_letter(ci)].width = w
+
+    r3 = 2
+    for k, p in sorted(without_card.items(), key=lambda x: (x[1]["last"], x[1]["first"])):
+        r3 += 1
+        classes   = ", ".join(sorted(p["classes"]))
+        susp_total = sum(e["amount"] for e in p["susp_entries"])
+        is_susp   = p["on_susp_list"]
+        bg = RED_L if is_susp else LGREY
+
+        _cell(ws3, r3, 1, p["last"],  bg=bg, bold=True)
+        _cell(ws3, r3, 2, p["first"], bg=bg, bold=True)
+        _cell(ws3, r3, 3, classes,    bg=bg)
+        _cell(ws3, r3, 4, "YES" if is_susp else "No",
+              bg=bg, bold=is_susp, align="center",
+              fg=RED if is_susp else GREEN)
+        if susp_total > 0:
+            _cell(ws3, r3, 5, susp_total, bg=bg, bold=True,
+                  fmt='"$"#,##0.00', align="right", fg=RED)
+        else:
+            _cell(ws3, r3, 5, "", bg=bg)
+        ws3.row_dimensions[r3].height = _row_height(
+            [p["last"], p["first"], classes, "", ""],
+            [w for _, w in hdrs3])
+
+    # Total row
+    r3 += 1
+    ws3.merge_cells(f"A{r3}:D{r3}")
+    gt3 = ws3.cell(row=r3, column=1, value=f"TOTAL WITHOUT CARD  —  {len(without_card)} entries")
+    gt3.font  = Font(name="Georgia", bold=True, size=10, color=WHITE)
+    gt3.fill  = PatternFill("solid", start_color=NAVY)
+    gt3.alignment = Alignment(horizontal="center", vertical="center")
+    gt3.border = _bd()
+    _cell(ws3, r3, 5, f"=SUM(E3:E{r3-1})", bg=GRN_L, bold=True,
+          fmt='"$"#,##0.00', align="right", fg=GREEN)
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # SHEET 4 — Fine Totals
+    # ALL suspended-list matches from alpha sheet
+    # One row per offense, subtotal per person, grand total
+    # ══════════════════════════════════════════════════════════════════════════
+    ws4 = wb.create_sheet("💰 Fine Totals")
+    ws4.sheet_view.showGridLines = False
+    ws4.freeze_panes = "A3"
+
+    _sheet_title(ws4, title_date, 7)
+
+    hdrs4 = list(zip(
         ["LAST NAME","FIRST NAME","CLASS ENTERED",
          "OFFENSE","EVENT","FINE AMOUNT","PERSON TOTAL"],
         [16, 14, 22, 52, 10, 14, 14]
     ))
-    for ci, (h, w) in enumerate(hdrs3_w, 1):
-        _hdr(ws3, 2, ci, h, bg=SLATE)
-        ws3.column_dimensions[get_column_letter(ci)].width = w
-    ws3.row_dimensions[2].height = 30
+    for ci, (h, w) in enumerate(hdrs4, 1):
+        _hdr(ws4, 2, ci, h, bg=SLATE)
+        ws4.column_dimensions[get_column_letter(ci)].width = w
+    ws4.row_dimensions[2].height = 30
 
-    from collections import OrderedDict
-    fines_by_person = OrderedDict()
-    person_meta     = {}
+    # Sort: highest total first
+    sorted_fine_persons = sorted(
+        fines_persons.items(),
+        key=lambda x: (-sum(e["amount"] for e in x[1]["susp_entries"]),
+                       x[1]["last"], x[1]["first"])
+    )
 
-    for row in detail_rows:
-        if row["source"] != "Suspended List":
-            continue
-        pk = (row["last"], row["first"])
-        fines_by_person.setdefault(pk, []).append(row)
-        person_meta[pk] = row["classes"]
+    FINE_BG   = "FEE2E2"
+    SUBTOT_BG = "475569"
 
-    def person_total(pk):
-        return sum(f["amount"] for f in fines_by_person[pk])
+    r4 = 2
+    subtotal_rows = []
 
-    sorted_persons = sorted(fines_by_person.keys(),
-                            key=lambda pk: -person_total(pk))
+    for k, p in sorted_fine_persons:
+        last    = p["last"]
+        first   = p["first"]
+        classes = ", ".join(sorted(p["classes"]))
+        fines   = p["susp_entries"]
 
-    r3 = 2
-    subtotal_row_refs = []
-
-    FINE_BG    = "FEE2E2"
-    SUBTOT_BG  = "1C2B4A"
-    SUBTOT_FG  = "FFFFFF"
-
-    for pk in sorted_persons:
-        last, first = pk
-        fines   = fines_by_person[pk]
-        classes = person_meta[pk]
-
-        fine_start_row = None
-        fine_end_row   = None
+        fine_start = None
+        fine_end   = None
 
         for fi, fine in enumerate(fines):
-            r3 += 1
-            if fine_start_row is None:
-                fine_start_row = r3
-            fine_end_row = r3
+            r4 += 1
+            if fine_start is None:
+                fine_start = r4
+            fine_end = r4
 
-            show_name = (fi == 0)
-            _cell(ws3, r3, 1, last    if show_name else "", bg=FINE_BG, bold=show_name)
-            _cell(ws3, r3, 2, first   if show_name else "", bg=FINE_BG, bold=show_name)
-            _cell(ws3, r3, 3, classes if show_name else "", bg=FINE_BG)
-            _cell(ws3, r3, 4, fine["offense"], bg=FINE_BG)
-            _cell(ws3, r3, 5, fine["event"],   bg=FINE_BG, align="center")
-            _cell(ws3, r3, 6, fine["amount"],  bg=FINE_BG, bold=True,
+            show = (fi == 0)
+            _cell(ws4, r4, 1, last    if show else "", bg=FINE_BG, bold=show)
+            _cell(ws4, r4, 2, first   if show else "", bg=FINE_BG, bold=show)
+            _cell(ws4, r4, 3, classes if show else "", bg=FINE_BG)
+            _cell(ws4, r4, 4, fine["offense"], bg=FINE_BG)
+            _cell(ws4, r4, 5, fine["event"],   bg=FINE_BG, align="center")
+            _cell(ws4, r4, 6, fine["amount"],  bg=FINE_BG, bold=True,
                   fmt='"$"#,##0.00', align="right", fg=RED)
-            _cell(ws3, r3, 7, "", bg=FINE_BG)
-            ws3.row_dimensions[r3].height = _row_height(
+            _cell(ws4, r4, 7, "", bg=FINE_BG)
+            ws4.row_dimensions[r4].height = _row_height(
                 [last, first, classes, fine["offense"], fine["event"], "", ""],
-                [w for _,w in hdrs3_w])
+                [w for _, w in hdrs4])
 
-        r3 += 1
-        subtotal_row_refs.append(r3)
-        _cell(ws3, r3, 7,
-              f"=SUM(F{fine_start_row}:F{fine_end_row})",
+        # Subtotal row
+        r4 += 1
+        subtotal_rows.append(r4)
+        _cell(ws4, r4, 7, f"=SUM(F{fine_start}:F{fine_end})",
               bg=GRN_L, bold=True, fmt='"$"#,##0.00', align="right", fg=GREEN)
         navy_fill = PatternFill("solid", start_color=SUBTOT_BG)
         for ci in range(1, 7):
-            c = ws3.cell(row=r3, column=ci)
+            c = ws4.cell(row=r4, column=ci)
             c.value = None
             c.fill  = navy_fill
             c.border = _bd()
-        ws3.merge_cells(f"A{r3}:F{r3}")
-        sub = ws3.cell(row=r3, column=1)
+        ws4.merge_cells(f"A{r4}:F{r4}")
+        sub = ws4.cell(row=r4, column=1)
         sub.value     = f"TOTAL  —  {last}, {first}"
-        sub.font      = Font(name="Georgia", bold=True, size=10, color=SUBTOT_FG)
+        sub.font      = Font(name="Georgia", bold=True, size=10, color=WHITE)
         sub.fill      = navy_fill
         sub.alignment = Alignment(horizontal="right", vertical="center", indent=1)
         sub.border    = _bd()
-        ws3.row_dimensions[r3].height = 18
+        ws4.row_dimensions[r4].height = 18
 
-        r3 += 1
+        # Spacer
+        r4 += 1
         for ci in range(1, 8):
-            ws3.cell(row=r3, column=ci).fill = PatternFill("solid", start_color="FFFFFF")
-        ws3.row_dimensions[r3].height = 5
+            ws4.cell(row=r4, column=ci).fill = PatternFill("solid", start_color="FFFFFF")
+        ws4.row_dimensions[r4].height = 5
 
-    r3 += 1
-    if subtotal_row_refs:
-        formula = "+".join(f"G{sr}" for sr in subtotal_row_refs)
-        _cell(ws3, r3, 7, f"={formula}",
+    # Grand total
+    r4 += 1
+    if subtotal_rows:
+        formula = "+".join(f"G{sr}" for sr in subtotal_rows)
+        _cell(ws4, r4, 7, f"={formula}",
               bg=GRN_L, bold=True, fmt='"$"#,##0.00', align="right", fg=GREEN)
-    navy_fill2 = PatternFill("solid", start_color=NAVY)
+    navy_fill2 = PatternFill("solid", start_color=SLATE)
     for ci in range(1, 7):
-        c = ws3.cell(row=r3, column=ci)
+        c = ws4.cell(row=r4, column=ci)
         c.value = None
         c.fill  = navy_fill2
         c.border = _bd()
-    ws3.merge_cells(f"A{r3}:F{r3}")
-    gtr = ws3.cell(row=r3, column=1)
+    ws4.merge_cells(f"A{r4}:F{r4}")
+    gtr = ws4.cell(row=r4, column=1)
     gtr.value     = "GRAND TOTAL — ALL FINES"
     gtr.font      = Font(name="Georgia", bold=True, size=11, color=WHITE)
     gtr.fill      = navy_fill2
     gtr.alignment = Alignment(horizontal="center", vertical="center")
     gtr.border    = _bd()
-    ws3.row_dimensions[r3].height = 22
+    ws4.row_dimensions[r4].height = 22
 
     wb.save(out_path)
     return out_path
