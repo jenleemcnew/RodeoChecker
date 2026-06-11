@@ -61,9 +61,19 @@ def load_alpha_sheet(path: str) -> pd.DataFrame:
             records.append(rec)
         df = pd.DataFrame(records)
     else:
-        df = pd.read_excel(path)
-        df["_pos7"] = ""
-        df["_pos8"] = ""
+        df = pd.read_excel(path, header=None)
+        header = [str(v).strip() for v in df.iloc[0].tolist()]
+        df = df.iloc[1:].reset_index(drop=True)
+        df.columns = range(len(df.columns))
+        df["_pos7"] = df[7].fillna("") if 7 in df.columns else ""
+        df["_pos8"] = df[8].fillna("") if 8 in df.columns else ""
+        named = {}
+        for i, h in enumerate(header):
+            if h and h != "nan" and i in df.columns:
+                named[h] = df[i]
+        named["_pos7"] = df["_pos7"]
+        named["_pos8"] = df["_pos8"]
+        df = pd.DataFrame(named)
 
     col_map = {}
     for c in df.columns:
