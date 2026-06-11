@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-RodeoChecker.py  –  Desktop GUI for the UPRA Flag Report
+RodeoChecker.py  –  Desktop GUI for the Fines & Card Verification report
 Run:  python3 RodeoChecker.py
 """
 
@@ -26,13 +26,13 @@ for d in (WATCHED, REF_DATA, REPORTS_DIR):
     d.mkdir(exist_ok=True)
 
 # ── Colour palette ────────────────────────────────────────────────────────────
-BG       = "#0F1923"
-CARD     = "#1A2535"
-ACCENT   = "#C8960C"
-ACCENT2  = "#E8B84B"
+BG       = "#0F1923"   # near-black background
+CARD     = "#1A2535"   # card/panel bg
+ACCENT   = "#C8960C"   # gold accent
+ACCENT2  = "#E8B84B"   # lighter gold
 RED      = "#DC2626"
 GREEN    = "#22C55E"
-TEXT     = "#F0EDE8"
+TEXT     = "#F0EDE8"   # warm white
 MUTED    = "#8899AA"
 BORDER   = "#2A3A4A"
 
@@ -45,6 +45,7 @@ FONT_M   = ("Courier New", 9)
 
 
 def find_alpha_sheet() -> Path | None:
+    """Find the most recently modified CSV or XLSX in the watched folder."""
     files = sorted(
         list(WATCHED.glob("*.csv")) + list(WATCHED.glob("*.xlsx")),
         key=lambda p: p.stat().st_mtime,
@@ -54,6 +55,7 @@ def find_alpha_sheet() -> Path | None:
 
 
 def open_file(path: str):
+    """Open a file with the system default app."""
     try:
         if sys.platform == "darwin":
             subprocess.Popen(["open", path])
@@ -66,6 +68,7 @@ def open_file(path: str):
 
 
 def open_folder(path: str):
+    """Reveal a folder in Finder / Explorer."""
     try:
         if sys.platform == "darwin":
             subprocess.Popen(["open", str(path)])
@@ -83,7 +86,7 @@ class RodeoCheckerApp(tk.Tk):
     def __init__(self):
         super().__init__()
 
-        self.title("Fines & Card Verification  ·  UPRA Report")
+        self.title("Fines & Card Verification  ·  Weekly Report Generator")
         self.configure(bg=BG)
         self.resizable(True, True)
         self.geometry("780x680")
@@ -92,6 +95,8 @@ class RodeoCheckerApp(tk.Tk):
         self._last_report = None
         self._build_ui()
         self._refresh_status()
+
+    # ── UI Construction ───────────────────────────────────────────────────────
 
     def _build_ui(self):
         # ── Header bar ───────────────────────────────────────────────────────
@@ -106,12 +111,13 @@ class RodeoCheckerApp(tk.Tk):
         titl.pack(side="left", pady=10)
         tk.Label(titl, text="FINES & CARD VERIFICATION", font=FONT_H,
                  bg=CARD, fg=TEXT).pack(anchor="w")
-        tk.Label(titl, text="UPRA Weekly Report Generator",
+        tk.Label(titl, text="Weekly Report Generator",
                  font=FONT_SUB, bg=CARD, fg=MUTED).pack(anchor="w")
 
         tk.Label(hdr, text=date.today().strftime("%B %d, %Y"),
                  font=FONT_N, bg=CARD, fg=MUTED).pack(side="right", padx=20)
 
+        # Separator
         tk.Frame(self, bg=ACCENT, height=2).pack(fill="x")
 
         # ── Main content area ─────────────────────────────────────────────────
@@ -178,6 +184,7 @@ class RodeoCheckerApp(tk.Tk):
                     import shutil
                     dest = REF_DATA / Path(chosen).name
                     shutil.copy2(chosen, dest)
+                    # Update global path variable
                     if "card" in p:
                         global CARD_FILE
                         CARD_FILE = dest
@@ -231,6 +238,7 @@ class RodeoCheckerApp(tk.Tk):
             command=lambda: open_folder(REPORTS_DIR),
         ).pack(side="left")
 
+        # ── Progress / log area ──────────────────────────────────────────────
         self._log_var = tk.StringVar(value="Ready.")
         tk.Label(s3, textvariable=self._log_var, font=FONT_S,
                  bg=CARD, fg=MUTED, anchor="w", wraplength=700).pack(
@@ -251,6 +259,7 @@ class RodeoCheckerApp(tk.Tk):
         )
         self._progress.pack(pady=(0, 12))
 
+        # ── Results summary ──────────────────────────────────────────────────
         self._result_frame = tk.Frame(main, bg=BG)
         self._result_frame.pack(fill="x")
 
@@ -262,7 +271,10 @@ class RodeoCheckerApp(tk.Tk):
         tk.Frame(f, bg=BORDER, height=1).pack(side="left", fill="x",
                                                expand=True, padx=(8, 0))
 
+    # ── Logic ─────────────────────────────────────────────────────────────────
+
     def _refresh_status(self):
+        # Alpha sheet
         alpha = find_alpha_sheet()
         if alpha:
             self._alpha_var.set(f"✓  {alpha.name}  (modified {date.fromtimestamp(alpha.stat().st_mtime)})")
@@ -271,6 +283,7 @@ class RodeoCheckerApp(tk.Tk):
             self._alpha_var.set("⚠  No file found — drop a CSV or XLSX into the watched folder")
             self._alpha_lbl.config(fg=ACCENT)
 
+        # Reference files
         for var, path, lbl_idx in [
             (self._card_var, CARD_FILE, 0),
             (self._susp_var, SUSP_FILE, 1),
@@ -282,6 +295,7 @@ class RodeoCheckerApp(tk.Tk):
                 var.set(f"✗  NOT FOUND  ({path.name})")
                 getattr(self, f"_ref_lbl_{lbl_idx}").config(fg=RED)
 
+        # Re-check every 3 seconds
         self.after(3000, self._refresh_status)
 
     def _browse_alpha(self):
@@ -316,6 +330,7 @@ class RodeoCheckerApp(tk.Tk):
         self._progress.start(12)
         self._log("Loading and matching data…")
 
+        # Run in background thread so UI stays responsive
         t = threading.Thread(target=self._worker,
                              args=(str(alpha), str(CARD_FILE), str(SUSP_FILE)),
                              daemon=True)
@@ -325,16 +340,17 @@ class RodeoCheckerApp(tk.Tk):
         try:
             from engine import run_match, build_excel
             self._log("Parsing files…")
-            match_rows, totals_rows, stats = run_match(alpha_path, card_path, susp_path)
+            person_map, with_card, without_card, fines_persons, flagged, stats = run_match(alpha_path, card_path, susp_path)
             self._log("Building Excel report…")
             out_name = f"Fines_Card_Verification_{date.today()}.xlsx"
             out_path = str(REPORTS_DIR / out_name)
-            build_excel(match_rows, totals_rows, stats, out_path)
+            build_excel(person_map, with_card, without_card, fines_persons, flagged, stats, out_path)
             self.after(0, self._done, out_path, stats)
         except Exception as e:
             self.after(0, self._error, str(e))
 
     def _done(self, report_path, stats):
+        # Switch to full green "complete" bar
         self._progress.stop()
         self._progress.config(mode="determinate",
                               style="done.Horizontal.TProgressbar",
@@ -349,14 +365,16 @@ class RodeoCheckerApp(tk.Tk):
             f"${stats['total_owed']:,.2f} owed"
         )
 
+        # Results summary cards
         for w in self._result_frame.winfo_children():
             w.destroy()
 
         cards_data = [
-            ("Flagged Names",     stats["flagged_names"],              RED   if stats["flagged_names"] else GREEN),
-            ("Suspended Matches", stats["susp_matches"],               RED   if stats["susp_matches"]  else GREEN),
-            ("Card # Matches",    stats["card_matches"],               ACCENT),
-            ("Total $ Owed",      f"${stats['total_owed']:,.2f}",      RED   if stats["total_owed"]    else GREEN),
+            ("Flagged",        stats["flagged_names"],           RED   if stats["flagged_names"] else GREEN),
+            ("Suspended",      stats["susp_matches"],            RED   if stats["susp_matches"]  else GREEN),
+            ("With Card #",    stats["with_card"],               ACCENT),
+            ("Without Card",   stats["without_card"],            MUTED),
+            ("Total $ Owed",   f"${stats['total_owed']:,.2f}",   RED   if stats["total_owed"]    else GREEN),
         ]
         for label, val, color in cards_data:
             box = tk.Frame(self._result_frame, bg=CARD,
@@ -366,6 +384,7 @@ class RodeoCheckerApp(tk.Tk):
                      bg=CARD, fg=color).pack(pady=(10, 2))
             tk.Label(box, text=label, font=FONT_S, bg=CARD, fg=MUTED).pack(pady=(0, 10))
 
+        # Auto-open report
         open_file(report_path)
 
     def _error(self, msg):
