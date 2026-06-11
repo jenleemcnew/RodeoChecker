@@ -362,12 +362,12 @@ def build_excel(person_map, with_card, without_card, fines_persons, flagged, sta
     for i, (label, val, bg, fg) in enumerate(stat_boxes, 1):
         _hdr(ws, 3, i, val,   bg=bg, fg=fg, sz=20, bold=True,  wrap=False)
         _hdr(ws, 4, i, label, bg=bg, fg=fg, sz=8,  bold=False, wrap=False)
-        ws.column_dimensions[get_column_letter(i)].width = 22
+        ws.column_dimensions[get_column_letter(i)].width = 28 if label == "TOTAL $ OWED" else 22
 
     # Header row
     r = 6
     ws.row_dimensions[r].height = 22
-    col_w = [24, 22, 28, 14, 14, 16]
+    col_w = [24, 22, 28, 14, 14, 18]
     for ci, h in enumerate(["NAME","CLASSES ENTERED","OFFENSES/FINES",
                              "CARD #(s)","CARD EVENTS","TOTAL OWED"], 1):
         _hdr(ws, r, ci, h, bg=SLATE)
