@@ -75,6 +75,13 @@ The generated `Fines_Card_Verification_YYYY-MM-DD.xlsx` has three sheets:
 - 🟦 **Navy bars** — Subtotal per person / Grand total row
 - 🟢 **Green cell** — Dollar total
 
+### Team Roping (Header + Heeler)
+Each TeamRoping entry on the alpha sheet lists two contestants — the header
+(Rider Last/First Name) and the heeler (the extra name columns after Entry
+Time). Both are checked independently against the card numbers and suspended
+lists, and each appears in the report labeled `TeamRoping (Header)` /
+`TeamRoping (Heeler)` so they're never missed.
+
 ---
 
 ## 🔄 Updating Reference Files
@@ -84,6 +91,20 @@ The card numbers and suspended list only change occasionally.
 **Via Desktop App:** Click the **Update…** button next to the file in the app.
 
 **Via GitHub:** Replace the file in `reference_data/` and commit/push.
+
+---
+
+## ⬆️ Updating to a New Version
+
+To pick up engine fixes/features on an existing local copy:
+
+```bash
+git pull --rebase
+```
+
+If you're running the **Desktop App** copy (not a git clone), just replace
+`engine.py` with the latest version from this repo and re-launch the app —
+no need to re-run `run_setup.sh` unless the Desktop shortcut itself is broken.
 
 ---
 
