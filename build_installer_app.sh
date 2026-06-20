@@ -14,7 +14,7 @@ echo "=== Building RodeoChecker release v${VERSION} ==="
 mkdir -p "$STAGING"
 
 # ── Copy distributable source files ──────────────────────────────────────────
-for f in RodeoChecker.py engine.py run_setup.sh VERSION CHANGELOG.md README.md bronc_icon.png; do
+for f in RodeoChecker.py engine.py run_setup.sh VERSION CHANGELOG.md README.md INSTALL.md bronc_icon.png; do
     [ -f "$REPO/$f" ] && cp "$REPO/$f" "$STAGING/"
 done
 [ -d "$REPO/reference_data" ] && cp -r "$REPO/reference_data" "$STAGING/"
