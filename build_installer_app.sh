@@ -19,65 +19,48 @@ for f in RodeoChecker.py engine.py run_setup.sh VERSION CHANGELOG.md README.md I
 done
 [ -d "$REPO/reference_data" ] && cp -r "$REPO/reference_data" "$STAGING/"
 
-# ── Build Install Update.app ─────────────────────────────────────────────────
-APP="$STAGING/Install Update.app"
-mkdir -p "$APP/Contents/MacOS"
-mkdir -p "$APP/Contents/Resources"
+# ── Build Install Update.app via osacompile (proper AppleScript bundle) ───────
+# Shell-script-as-CFBundleExecutable is blocked by macOS Sequoia (-47 error).
+# osacompile produces a real compiled app that Gatekeeper/Finder accept.
 
-cat > "$APP/Contents/Info.plist" << 'EOF'
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>CFBundleName</key>
-    <string>Install Update</string>
-    <key>CFBundleDisplayName</key>
-    <string>Install Update</string>
-    <key>CFBundleIdentifier</key>
-    <string>com.rodeochecker.installer</string>
-    <key>CFBundleVersion</key>
-    <string>1.0</string>
-    <key>CFBundlePackageType</key>
-    <string>APPL</string>
-    <key>CFBundleExecutable</key>
-    <string>launch</string>
-    <key>NSHighResolutionCapable</key>
-    <true/>
-</dict>
-</plist>
-EOF
+TMPSCRIPT="$(mktemp /tmp/rodeochecker_installer_XXXX.applescript)"
 
-cat > "$APP/Contents/MacOS/launch" << 'EOF'
-#!/bin/bash
-# Use BASH_SOURCE so the path resolves correctly when macOS launches the bundle
-DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
-SETUP="$DIR/run_setup.sh"
+cat > "$TMPSCRIPT" << 'APPLESCRIPT'
+on run
+    -- Locate the RodeoChecker folder (parent of this .app bundle)
+    set myPath to POSIX path of (path to me)
+    set rcFolder to do shell script "dirname " & quoted form of myPath
+    set setupScript to rcFolder & "/run_setup.sh"
 
-if [ ! -f "$SETUP" ]; then
-    osascript -e 'display alert "Rodeo Checker — Install Update" message "Could not find run_setup.sh.\n\nMake sure Install Update.app is still inside the RodeoChecker folder you unzipped." as critical'
-    exit 1
-fi
+    -- Verify run_setup.sh exists
+    try
+        do shell script "test -f " & quoted form of setupScript
+    on error
+        display alert "Rodeo Checker — Install Update" message "Could not find run_setup.sh." & return & return & "Make sure Install Update.app is still inside the RodeoChecker folder you unzipped." as critical
+        return
+    end try
 
-# Safari quarantines every file in a downloaded zip. Clear it so the scripts can run.
-xattr -cr "$DIR" 2>/dev/null || true
+    -- Clear Safari quarantine from the whole folder so scripts can run
+    do shell script "xattr -cr " & quoted form of rcFolder
 
-osascript -e 'display alert "Rodeo Checker — Install Update" message "This will install the latest version of Rodeo Checker.\n\nClick OK to continue." buttons {"Cancel", "OK"} default button "OK"' 2>/dev/null
-if [ $? -ne 0 ]; then
-    exit 0
-fi
+    -- Confirm before running
+    set response to button returned of (display alert "Rodeo Checker — Install Update" message "This will install the latest version of Rodeo Checker." & return & return & "Click OK to continue." buttons {"Cancel", "OK"} default button "OK")
+    if response is "Cancel" then return
 
-cd "$DIR"
-bash "$SETUP" > /tmp/rodeochecker_install.log 2>&1
-RESULT=$?
+    -- Run setup
+    try
+        do shell script "bash " & quoted form of setupScript & " > /tmp/rodeochecker_install.log 2>&1"
+        display alert "Rodeo Checker — Install Update" message "Update installed!" & return & return & "You can now close this window and double-click the Rodeo Checker icon on your Desktop." as informational
+    on error
+        display alert "Rodeo Checker — Install Update" message "Something went wrong during setup." & return & return & "A log was saved to /tmp/rodeochecker_install.log — send a screenshot if you need help." as critical
+    end try
+end run
+APPLESCRIPT
 
-if [ $RESULT -eq 0 ]; then
-    osascript -e 'display alert "Rodeo Checker — Install Update" message "Update installed!\n\nYou can now close this window and use the Rodeo Checker icon on your Desktop as usual." as informational'
-else
-    osascript -e 'display alert "Rodeo Checker — Install Update" message "Something went wrong during setup.\n\nA log was saved to /tmp/rodeochecker_install.log — send a screenshot of it if you need help." as critical'
-fi
-EOF
+osacompile -o "$STAGING/Install Update.app" "$TMPSCRIPT"
+rm "$TMPSCRIPT"
 
-chmod +x "$APP/Contents/MacOS/launch"
+echo "✓ Built Install Update.app"
 
 # ── Create zip ────────────────────────────────────────────────────────────────
 mkdir -p "$RELEASES_DIR"
