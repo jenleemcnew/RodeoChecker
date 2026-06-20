@@ -21,6 +21,15 @@ REF_DATA    = BASE / "reference_data"
 REPORTS_DIR = BASE / "reports"
 CARD_FILE   = REF_DATA / "card_numbers.xlsx"
 SUSP_FILE   = REF_DATA / "suspended_list.xlsx"
+VERSION_FILE = BASE / "VERSION"
+
+def get_version() -> str:
+    try:
+        return VERSION_FILE.read_text().strip()
+    except Exception:
+        return "unknown"
+
+APP_VERSION = get_version()
 
 for d in (WATCHED, REF_DATA, REPORTS_DIR):
     d.mkdir(exist_ok=True)
@@ -86,7 +95,7 @@ class RodeoCheckerApp(tk.Tk):
     def __init__(self):
         super().__init__()
 
-        self.title("Fines & Card Verification  ·  Weekly Report Generator")
+        self.title(f"Fines & Card Verification  ·  Weekly Report Generator  ·  v{APP_VERSION}")
         self.configure(bg=BG)
         self.resizable(True, True)
         self.geometry("780x680")
