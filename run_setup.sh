@@ -1,11 +1,17 @@
 #!/bin/bash
-# run_setup.sh  –  Run once after cloning/unzipping on Mac
-# Automatically installs dependencies and creates a Desktop launcher app.
+# run_setup.sh  –  Run after downloading/unzipping a Rodeo Checker release.
+# Safe to re-run any time there's an update: it reinstalls dependencies
+# and rebuilds the Desktop launcher, replacing whatever was there before.
 
 set -e
 DIR="$(cd "$(dirname "$0")" && pwd)"
 
-echo "=== Rodeo Checker Setup ==="
+VERSION="unknown"
+if [ -f "$DIR/VERSION" ]; then
+    VERSION="$(cat "$DIR/VERSION")"
+fi
+
+echo "=== Rodeo Checker Setup — version $VERSION ==="
 echo ""
 
 # ── 1. Find Python ────────────────────────────────────────────────────────────
@@ -103,9 +109,14 @@ spctl --add "$APP_PATH" 2>/dev/null || true
 # ── 5. Done ───────────────────────────────────────────────────────────────────
 echo ""
 echo "==================================================="
-echo " Setup complete!"
+echo " Setup complete! (version $VERSION)"
 echo " Double-click 'Rodeo Checker' on your Desktop"
 echo " to launch the app — no Terminal needed!"
+echo ""
+echo " Updating later? Download the newest version from"
+echo " the GitHub Releases page, then double-click"
+echo " 'Install Update' inside the unzipped folder —"
+echo " no Terminal needed for that either."
 echo "==================================================="
 echo ""
 
