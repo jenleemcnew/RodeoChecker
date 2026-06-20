@@ -49,7 +49,8 @@ EOF
 
 cat > "$APP/Contents/MacOS/launch" << 'EOF'
 #!/bin/bash
-DIR="$(cd "$(dirname "$0")/../../.." && pwd)"
+# Use BASH_SOURCE so the path resolves correctly when macOS launches the bundle
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 SETUP="$DIR/run_setup.sh"
 
 if [ ! -f "$SETUP" ]; then
