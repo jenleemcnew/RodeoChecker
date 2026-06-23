@@ -10,40 +10,18 @@ Double-click **RodeoChecker-v1.1.0.zip** in your Downloads folder. This creates 
 
 ---
 
-## Step 2 — Open Install Update
+## Step 2 — Run Install Update
 
 1. Open the **RodeoChecker** folder
-2. **Right-click** on **Install Update** and choose **Open**
-   *(Do not double-click — right-click is required the first time)*
+2. Double-click **Install Update** (the file with the black Terminal icon)
+3. macOS will ask: *"Are you sure you want to open it?"* — click **Open**
+4. A Terminal window appears with instructions — press **Enter** to continue
+
+The installer runs automatically. When it says "Done!", you can close the Terminal window.
 
 ---
 
-## Step 3 — Allow it in System Settings
-
-macOS will show a warning: *"Install Update" Not Opened*.
-
-1. Click **Done** (not "Move to Trash")
-2. Open **System Settings → Privacy & Security**
-3. Scroll down until you see: *"Install Update" was blocked from use because it is not from an identified developer*
-4. Click **Open Anyway**
-5. Enter your Mac password if asked
-6. Click **Open** in the final confirmation dialog
-
-> This warning appears once per download because the app isn't sold through the Mac App Store. It's safe to allow.
-
----
-
-## Step 4 — Run the installer
-
-A dialog will appear: *"This will install the latest version of Rodeo Checker."*
-
-Click **OK**. The installer runs automatically — no Terminal needed.
-
-When it finishes you'll see: *"Update installed!"*
-
----
-
-## Step 5 — Launch the app
+## Step 3 — Launch the app
 
 A **Rodeo Checker** icon will appear on your Desktop. Double-click it any time to run a report.
 
@@ -51,4 +29,4 @@ A **Rodeo Checker** icon will appear on your Desktop. Double-click it any time t
 
 ## Updating later
 
-When a new version is available, download the new zip, unzip it, and repeat Steps 2–4. You won't need to go through the System Settings step again for future updates — only the very first install on each Mac.
+When a new version is available, download the new zip, unzip it, and repeat Step 2.
