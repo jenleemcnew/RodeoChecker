@@ -78,8 +78,9 @@ chmod +x "$STAGING/Install Update.command"
 
 echo "✓ Created Install Update.command"
 
-# ── Create zip ────────────────────────────────────────────────────────────────
+# ── Create zip (delete first so zip -r never retains stale entries) ──────────
 mkdir -p "$RELEASES_DIR"
+rm -f "$RELEASES_DIR/$ZIP_NAME"
 STAGING_PARENT="$(dirname "$STAGING")"
 cd "$STAGING_PARENT"
 zip -r "$RELEASES_DIR/$ZIP_NAME" "RodeoChecker/" --exclude "*.DS_Store" --exclude "*__pycache__*" --exclude "*.pyc"
