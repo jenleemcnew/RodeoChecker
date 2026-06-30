@@ -41,12 +41,12 @@ chmod +x "$PKGSCRIPTS/run_setup.sh"
 # Postinstall: call run_setup.sh from the Scripts dir (always present during execution)
 cat > "$PKGSCRIPTS/postinstall" << 'EOF'
 #!/bin/bash
+TARGET_USER="$(stat -f '%Su' /dev/console 2>/dev/null || echo "$USER")"
+INSTALL_DIR="/Users/$TARGET_USER/Library/Application Support/RodeoChecker"
 SETUP="$(dirname "$0")/run_setup.sh"
 
-TARGET_USER="$(stat -f '%Su' /dev/console 2>/dev/null || echo "$USER")"
-
-# Run setup as the logged-in user so $HOME and Python env resolve correctly
-su "$TARGET_USER" -c "bash '$SETUP'"
+# cd into the install dir so run_setup.sh can find RodeoChecker.py etc.
+su "$TARGET_USER" -c "cd '$INSTALL_DIR' && bash '$SETUP'"
 EOF
 chmod +x "$PKGSCRIPTS/postinstall"
 
