@@ -19,64 +19,52 @@ for f in RodeoChecker.py engine.py run_setup.sh VERSION CHANGELOG.md README.md I
 done
 [ -d "$REPO/reference_data" ] && cp -r "$REPO/reference_data" "$STAGING/"
 
-# ── Create "Install Update.command" ──────────────────────────────────────────
-# .app bundles are blocked by macOS Sequoia Gatekeeper (error -47) when
-# downloaded from the internet. A .command file opens in Terminal with a
-# simple "are you sure?" prompt — no Privacy & Security dance needed.
+# ── Build Install Update.app via osacompile ───────────────────────────────────
+# osacompile produces a real compiled AppleScript app.
+# On macOS Sequoia this still requires Privacy & Security > Open Anyway once,
+# but after that it runs cleanly with no Terminal needed.
+#
+# Path bug note: `path to me` returns a trailing slash, which makes `dirname`
+# return the app path itself instead of the parent. Strip the slash first.
 
-cat > "$STAGING/Install Update.command" << 'EOF'
-#!/bin/bash
-clear
-DIR="$(cd "$(dirname "$0")" && pwd)"
-SETUP="$DIR/run_setup.sh"
+TMPSCRIPT="$(mktemp /tmp/rodeochecker_installer_XXXX.applescript)"
 
-echo "============================================="
-echo "   Rodeo Checker — Install / Update"
-echo "============================================="
-echo ""
+cat > "$TMPSCRIPT" << 'APPLESCRIPT'
+on run
+    -- path to me has a trailing slash; strip it before calling dirname
+    set appBundle to POSIX path of (path to me)
+    set rcFolder to do shell script "p=" & quoted form of appBundle & "; dirname \"${p%/}\""
+    set setupScript to rcFolder & "/run_setup.sh"
 
-if [ ! -f "$SETUP" ]; then
-    echo "ERROR: Could not find run_setup.sh."
-    echo "Make sure this file is still inside the RodeoChecker folder you unzipped."
-    echo ""
-    echo "Press any key to close…"
-    read -n1
-    exit 1
-fi
+    -- Verify run_setup.sh exists
+    try
+        do shell script "test -f " & quoted form of setupScript
+    on error
+        display alert "Rodeo Checker — Install Update" message "Could not find run_setup.sh." & return & return & "Make sure Install Update.app is still inside the RodeoChecker folder you unzipped." as critical
+        return
+    end try
 
-# Clear Safari quarantine from the whole folder
-xattr -cr "$DIR" 2>/dev/null || true
+    -- Clear Safari quarantine from the whole folder so scripts can run
+    do shell script "xattr -cr " & quoted form of rcFolder
 
-echo "This will install/update Rodeo Checker on your Desktop."
-echo ""
-read -p "Press ENTER to continue (or close this window to cancel)… "
-echo ""
+    -- Confirm before running
+    set response to button returned of (display alert "Rodeo Checker — Install Update" message "This will install the latest version of Rodeo Checker." & return & return & "Click OK to continue." buttons {"Cancel", "OK"} default button "OK")
+    if response is "Cancel" then return
 
-bash "$SETUP" 2>&1 | tee /tmp/rodeochecker_install.log
-RESULT=${PIPESTATUS[0]}
+    -- Run setup
+    try
+        do shell script "bash " & quoted form of setupScript & " > /tmp/rodeochecker_install.log 2>&1"
+        display alert "Rodeo Checker — Install Update" message "Update installed!" & return & return & "You can now close this window and double-click the Rodeo Checker icon on your Desktop." as informational
+    on error
+        display alert "Rodeo Checker — Install Update" message "Something went wrong during setup." & return & return & "A log was saved to /tmp/rodeochecker_install.log — send a screenshot if you need help." as critical
+    end try
+end run
+APPLESCRIPT
 
-echo ""
-if [ $RESULT -eq 0 ]; then
-    echo "============================================="
-    echo "   Done! You can close this window."
-    echo "   Use the Rodeo Checker icon on your Desktop."
-    echo "============================================="
-else
-    echo "============================================="
-    echo "   Something went wrong."
-    echo "   Log saved to /tmp/rodeochecker_install.log"
-    echo "   Send a screenshot of this window if you"
-    echo "   need help."
-    echo "============================================="
-fi
-echo ""
-echo "Press any key to close…"
-read -n1
-EOF
+osacompile -o "$STAGING/Install Update.app" "$TMPSCRIPT"
+rm "$TMPSCRIPT"
 
-chmod +x "$STAGING/Install Update.command"
-
-echo "✓ Created Install Update.command"
+echo "✓ Built Install Update.app"
 
 # ── Create zip (delete first so zip -r never retains stale entries) ──────────
 mkdir -p "$RELEASES_DIR"
