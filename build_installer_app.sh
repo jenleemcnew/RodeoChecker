@@ -31,17 +31,29 @@ TMPSCRIPT="$(mktemp /tmp/rodeochecker_installer_XXXX.applescript)"
 
 cat > "$TMPSCRIPT" << 'APPLESCRIPT'
 on run
-    -- path to me has a trailing slash; strip it before calling dirname
+    -- Try to find the RodeoChecker folder automatically.
+    -- macOS Sequoia may translocate the app to a temp path, so if the
+    -- auto-detected path doesn't contain run_setup.sh, fall back to a
+    -- folder picker so the user can point us to the right place.
     set appBundle to POSIX path of (path to me)
     set rcFolder to do shell script "p=" & quoted form of appBundle & "; dirname \"${p%/}\""
     set setupScript to rcFolder & "/run_setup.sh"
 
-    -- Verify run_setup.sh exists
+    -- Check if auto-detection worked; if not, ask the user to locate the folder
     try
         do shell script "test -f " & quoted form of setupScript
     on error
-        display alert "Rodeo Checker — Install Update" message "Could not find run_setup.sh." & return & return & "Make sure Install Update.app is still inside the RodeoChecker folder you unzipped." as critical
-        return
+        display alert "Rodeo Checker — Install Update" message "One more step: please select the RodeoChecker folder in the next window." as informational buttons {"OK"} default button "OK"
+        set chosenFolder to choose folder with prompt "Select the RodeoChecker folder you unzipped (it contains run_setup.sh):"
+        set rcFolder to POSIX path of chosenFolder
+        if rcFolder ends with "/" then set rcFolder to text 1 thru -2 of rcFolder
+        set setupScript to rcFolder & "/run_setup.sh"
+        try
+            do shell script "test -f " & quoted form of setupScript
+        on error
+            display alert "Rodeo Checker — Install Update" message "Could not find run_setup.sh in the selected folder." & return & return & "Please select the RodeoChecker folder that contains run_setup.sh." as critical
+            return
+        end try
     end try
 
     -- Clear Safari quarantine from the whole folder so scripts can run
