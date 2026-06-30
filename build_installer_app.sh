@@ -45,8 +45,9 @@ TARGET_USER="$(stat -f '%Su' /dev/console 2>/dev/null || echo "$USER")"
 INSTALL_DIR="/Users/$TARGET_USER/Library/Application Support/RodeoChecker"
 SETUP="$(dirname "$0")/run_setup.sh"
 
-# cd into the install dir so run_setup.sh can find RodeoChecker.py etc.
-su "$TARGET_USER" -c "cd '$INSTALL_DIR' && bash '$SETUP'"
+# Pass INSTALL_DIR as $1 so run_setup.sh uses it as DIR instead of
+# trying to resolve its own location (which is a pkg temp Scripts dir).
+su "$TARGET_USER" -c "bash '$SETUP' '$INSTALL_DIR'"
 EOF
 chmod +x "$PKGSCRIPTS/postinstall"
 

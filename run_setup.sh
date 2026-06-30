@@ -4,7 +4,9 @@
 # and rebuilds the Desktop launcher, replacing whatever was there before.
 
 set -e
-DIR="$(cd "$(dirname "$0")" && pwd)"
+# When called from the pkg postinstall, $1 is the install path.
+# When run directly, fall back to the script's own directory.
+DIR="${1:-$(cd "$(dirname "$0")" && pwd)}"
 
 VERSION="unknown"
 if [ -f "$DIR/VERSION" ]; then
@@ -120,6 +122,4 @@ echo " no Terminal needed for that either."
 echo "==================================================="
 echo ""
 
-open "$DIR"
-sleep 1
 open "$APP_PATH"
