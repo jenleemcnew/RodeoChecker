@@ -5,7 +5,7 @@ set -e
 
 REPO="$(cd "$(dirname "$0")" && pwd)"
 VERSION="$(cat "$REPO/VERSION")"
-RELEASES_DIR="$(dirname "$REPO")/../RodeoChecker_Releases"
+RELEASES_DIR="$(dirname "$REPO")/RodeoChecker_Releases"
 STAGING="$(mktemp -d)/RodeoChecker"
 ZIP_NAME="RodeoChecker-v${VERSION}.zip"
 
@@ -75,6 +75,16 @@ APPLESCRIPT
 
 osacompile -o "$STAGING/Install Update.app" "$TMPSCRIPT"
 rm "$TMPSCRIPT"
+
+# Remove any stale shell script left over from previous app builds —
+# osacompile may inherit files from an existing bundle at that path,
+# and a foreign file invalidates the code signature (causes -47 / "damaged").
+rm -f "$STAGING/Install Update.app/Contents/MacOS/launch"
+
+# Re-sign with a fresh ad-hoc signature so the signature matches
+# exactly what will be in the zip.
+codesign --force --deep --sign - "$STAGING/Install Update.app"
+codesign --verify --deep "$STAGING/Install Update.app" && echo "✓ Signature valid"
 
 echo "✓ Built Install Update.app"
 
