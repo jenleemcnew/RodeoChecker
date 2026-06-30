@@ -92,10 +92,6 @@ PYTHON="${PYTHON}"
 EOF
 
 cat >> "$APP_PATH/Contents/MacOS/launch" << 'ENDOFSCRIPT'
-if [ ! -f "$SCRIPT" ]; then
-    osascript -e 'display alert "Rodeo Checker" message "Could not find RodeoChecker.py.\n\nMake sure you have not moved the RodeoChecker folder." as critical'
-    exit 1
-fi
 cd "$(dirname "$SCRIPT")"
 "$PYTHON" "$SCRIPT"
 ENDOFSCRIPT
@@ -122,4 +118,8 @@ echo " no Terminal needed for that either."
 echo "==================================================="
 echo ""
 
-open "$APP_PATH"
+# Only launch the app immediately when run interactively (not from pkg postinstall,
+# where the payload isn't committed yet and the app would open to missing files).
+if [ -z "$1" ]; then
+    open "$APP_PATH"
+fi
