@@ -34,23 +34,18 @@ INSTALL_SUBPATH="Library/Application Support/RodeoChecker"
 mkdir -p "$PKGROOT/$INSTALL_SUBPATH"
 cp -r "$STAGING/." "$PKGROOT/$INSTALL_SUBPATH/"
 
-# Postinstall script: run setup from the installed location
+# Bundle run_setup.sh into Scripts/ so it's available before payload is committed
+cp "$REPO/run_setup.sh" "$PKGSCRIPTS/run_setup.sh"
+chmod +x "$PKGSCRIPTS/run_setup.sh"
+
+# Postinstall: call run_setup.sh from the Scripts dir (always present during execution)
 cat > "$PKGSCRIPTS/postinstall" << 'EOF'
 #!/bin/bash
-# $HOME is not set in pkg scripts — derive it from the install target user
+SETUP="$(dirname "$0")/run_setup.sh"
+
 TARGET_USER="$(stat -f '%Su' /dev/console 2>/dev/null || echo "$USER")"
-TARGET_HOME=$(dscl . -read "/Users/$TARGET_USER" NFSHomeDirectory 2>/dev/null | awk '{print $2}')
-[ -z "$TARGET_HOME" ] && TARGET_HOME="/Users/$TARGET_USER"
 
-INSTALL_DIR="$TARGET_HOME/Library/Application Support/RodeoChecker"
-SETUP="$INSTALL_DIR/run_setup.sh"
-
-if [ ! -f "$SETUP" ]; then
-    echo "ERROR: run_setup.sh not found at $INSTALL_DIR" >&2
-    exit 1
-fi
-
-# Run setup as the target user
+# Run setup as the logged-in user so $HOME and Python env resolve correctly
 su "$TARGET_USER" -c "bash '$SETUP'"
 EOF
 chmod +x "$PKGSCRIPTS/postinstall"
