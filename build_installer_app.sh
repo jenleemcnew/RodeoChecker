@@ -1,5 +1,5 @@
 #!/bin/bash
-# build_installer_app.sh — DEV TOOL. Run this to produce the release zip.
+# build_installer_app.sh — DEV TOOL. Run this to produce the release zip + pkg.
 # Lives in the git repo but is NOT included in the distributable zip.
 set -e
 
@@ -8,6 +8,7 @@ VERSION="$(cat "$REPO/VERSION")"
 RELEASES_DIR="$(dirname "$REPO")/RodeoChecker_Releases"
 STAGING="$(mktemp -d)/RodeoChecker"
 ZIP_NAME="RodeoChecker-v${VERSION}.zip"
+PKG_NAME="RodeoChecker-v${VERSION}.pkg"
 
 echo "=== Building RodeoChecker release v${VERSION} ==="
 
@@ -19,27 +20,63 @@ for f in RodeoChecker.py engine.py run_setup.sh VERSION CHANGELOG.md README.md I
 done
 [ -d "$REPO/reference_data" ] && cp -r "$REPO/reference_data" "$STAGING/"
 
-# ── Build Install Update.app via osacompile ───────────────────────────────────
-# osacompile produces a real compiled AppleScript app.
-# On macOS Sequoia this still requires Privacy & Security > Open Anyway once,
-# but after that it runs cleanly with no Terminal needed.
-#
-# Path bug note: `path to me` returns a trailing slash, which makes `dirname`
-# return the app path itself instead of the parent. Strip the slash first.
+# ── Build .pkg installer ──────────────────────────────────────────────────────
+# The .pkg installs source files to ~/Library/Application Support/RodeoChecker/
+# and runs run_setup.sh as a postinstall script.
+# No Gatekeeper app-bundle issues — macOS Installer.app handles execution.
+# Still requires Privacy & Security > Open Anyway once for unsigned .pkg.
 
+PKGROOT="$(mktemp -d)"
+PKGSCRIPTS="$(mktemp -d)"
+INSTALL_SUBPATH="Library/Application Support/RodeoChecker"
+
+# Payload: source files go into the package root at the install subpath
+mkdir -p "$PKGROOT/$INSTALL_SUBPATH"
+cp -r "$STAGING/." "$PKGROOT/$INSTALL_SUBPATH/"
+
+# Postinstall script: run setup from the installed location
+cat > "$PKGSCRIPTS/postinstall" << 'EOF'
+#!/bin/bash
+# $HOME is not set in pkg scripts — derive it from the install target user
+TARGET_USER="$(stat -f '%Su' /dev/console 2>/dev/null || echo "$USER")"
+TARGET_HOME=$(dscl . -read "/Users/$TARGET_USER" NFSHomeDirectory 2>/dev/null | awk '{print $2}')
+[ -z "$TARGET_HOME" ] && TARGET_HOME="/Users/$TARGET_USER"
+
+INSTALL_DIR="$TARGET_HOME/Library/Application Support/RodeoChecker"
+SETUP="$INSTALL_DIR/run_setup.sh"
+
+if [ ! -f "$SETUP" ]; then
+    echo "ERROR: run_setup.sh not found at $INSTALL_DIR" >&2
+    exit 1
+fi
+
+# Run setup as the target user
+su "$TARGET_USER" -c "bash '$SETUP'"
+EOF
+chmod +x "$PKGSCRIPTS/postinstall"
+
+# Build the .pkg
+mkdir -p "$RELEASES_DIR"
+pkgbuild \
+    --root "$PKGROOT" \
+    --scripts "$PKGSCRIPTS" \
+    --identifier "com.rodeochecker.installer" \
+    --version "$VERSION" \
+    --install-location "/" \
+    "$RELEASES_DIR/$PKG_NAME"
+
+rm -rf "$PKGROOT" "$PKGSCRIPTS"
+echo "✓ Built $PKG_NAME"
+
+# ── Build Install Update.app via osacompile (kept as zip fallback) ────────────
 TMPSCRIPT="$(mktemp /tmp/rodeochecker_installer_XXXX.applescript)"
 
 cat > "$TMPSCRIPT" << 'APPLESCRIPT'
 on run
-    -- Try to find the RodeoChecker folder automatically.
-    -- macOS Sequoia may translocate the app to a temp path, so if the
-    -- auto-detected path doesn't contain run_setup.sh, fall back to a
-    -- folder picker so the user can point us to the right place.
     set appBundle to POSIX path of (path to me)
     set rcFolder to do shell script "p=" & quoted form of appBundle & "; dirname \"${p%/}\""
     set setupScript to rcFolder & "/run_setup.sh"
 
-    -- Check if auto-detection worked; if not, ask the user to locate the folder
     try
         do shell script "test -f " & quoted form of setupScript
     on error
@@ -56,14 +93,11 @@ on run
         end try
     end try
 
-    -- Clear Safari quarantine from the whole folder so scripts can run
     do shell script "xattr -cr " & quoted form of rcFolder
 
-    -- Confirm before running
     set response to button returned of (display alert "Rodeo Checker — Install Update" message "This will install the latest version of Rodeo Checker." & return & return & "Click OK to continue." buttons {"Cancel", "OK"} default button "OK")
     if response is "Cancel" then return
 
-    -- Run setup
     try
         do shell script "bash " & quoted form of setupScript & " > /tmp/rodeochecker_install.log 2>&1"
         display alert "Rodeo Checker — Install Update" message "Update installed!" & return & return & "You can now close this window and double-click the Rodeo Checker icon on your Desktop." as informational
@@ -75,21 +109,11 @@ APPLESCRIPT
 
 osacompile -o "$STAGING/Install Update.app" "$TMPSCRIPT"
 rm "$TMPSCRIPT"
-
-# Remove any stale shell script left over from previous app builds —
-# osacompile may inherit files from an existing bundle at that path,
-# and a foreign file invalidates the code signature (causes -47 / "damaged").
 rm -f "$STAGING/Install Update.app/Contents/MacOS/launch"
-
-# Re-sign with a fresh ad-hoc signature so the signature matches
-# exactly what will be in the zip.
 codesign --force --deep --sign - "$STAGING/Install Update.app"
-codesign --verify --deep "$STAGING/Install Update.app" && echo "✓ Signature valid"
-
-echo "✓ Built Install Update.app"
+codesign --verify --deep "$STAGING/Install Update.app" && echo "✓ App signature valid"
 
 # ── Create zip (delete first so zip -r never retains stale entries) ──────────
-mkdir -p "$RELEASES_DIR"
 rm -f "$RELEASES_DIR/$ZIP_NAME"
 STAGING_PARENT="$(dirname "$STAGING")"
 cd "$STAGING_PARENT"
@@ -99,6 +123,7 @@ rm -rf "$STAGING_PARENT"
 
 echo ""
 echo "✓ Release zip: $RELEASES_DIR/$ZIP_NAME"
+echo "✓ Release pkg: $RELEASES_DIR/$PKG_NAME"
 echo ""
-echo "To replace the v${VERSION} GitHub release asset, run:"
-echo "  gh release upload v${VERSION} \"$RELEASES_DIR/$ZIP_NAME\" --repo jenleemcnew/RodeoChecker --clobber"
+echo "Upload both to GitHub:"
+echo "  gh release upload v${VERSION} \"$RELEASES_DIR/$PKG_NAME\" \"$RELEASES_DIR/$ZIP_NAME\" --repo jenleemcnew/RodeoChecker --clobber"
