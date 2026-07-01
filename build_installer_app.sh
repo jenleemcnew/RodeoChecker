@@ -21,7 +21,7 @@ done
 [ -d "$REPO/reference_data" ] && cp -r "$REPO/reference_data" "$STAGING/"
 
 # ── Build .pkg installer ──────────────────────────────────────────────────────
-# The .pkg installs source files to ~/Library/Application Support/RodeoChecker/
+# The .pkg installs source files to /Library/Application Support/RodeoChecker/ (system Library)
 # and runs run_setup.sh as a postinstall script.
 # No Gatekeeper app-bundle issues — macOS Installer.app handles execution.
 # Still requires Privacy & Security > Open Anyway once for unsigned .pkg.
@@ -42,7 +42,7 @@ chmod +x "$PKGSCRIPTS/run_setup.sh"
 cat > "$PKGSCRIPTS/postinstall" << 'EOF'
 #!/bin/bash
 TARGET_USER="$(stat -f '%Su' /dev/console 2>/dev/null || echo "$USER")"
-INSTALL_DIR="/Users/$TARGET_USER/Library/Application Support/RodeoChecker"
+INSTALL_DIR="/Library/Application Support/RodeoChecker"
 SETUP="$(dirname "$0")/run_setup.sh"
 
 # Pass INSTALL_DIR as $1 so run_setup.sh uses it as DIR instead of
