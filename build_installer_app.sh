@@ -45,6 +45,10 @@ TARGET_USER="$(stat -f '%Su' /dev/console 2>/dev/null || echo "$USER")"
 INSTALL_DIR="/Library/Application Support/RodeoChecker"
 SETUP="$(dirname "$0")/run_setup.sh"
 
+# Hand ownership of the installed files to the user so the app can write
+# subdirectories (watched_folder etc.) inside the install dir at runtime.
+chown -R "$TARGET_USER" "$INSTALL_DIR"
+
 # Pass INSTALL_DIR as $1 so run_setup.sh uses it as DIR instead of
 # trying to resolve its own location (which is a pkg temp Scripts dir).
 su "$TARGET_USER" -c "bash '$SETUP' '$INSTALL_DIR'"
