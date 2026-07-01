@@ -63,7 +63,11 @@ TMPSCRIPT="$(mktemp -t rodeochecker_launcher).applescript"
 # Single-quote them in the shell command so spaces in paths are handled.
 cat > "$TMPSCRIPT" << EOF
 on run
-    do shell script "'${PYTHON}' '${DIR}/RodeoChecker.py' > /dev/null 2>&1 &"
+    try
+        do shell script "'${PYTHON}' '${DIR}/RodeoChecker.py'"
+    on error errMsg
+        display alert "Rodeo Checker" message "Could not launch: " & errMsg as critical
+    end try
 end run
 EOF
 
