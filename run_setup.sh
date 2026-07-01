@@ -58,7 +58,7 @@ rm -rf "$APP_PATH"
 
 # macOS Sequoia blocks shell scripts as CFBundleExecutable (-47 "damaged" error).
 # Use osacompile to produce a proper compiled AppleScript app bundle instead.
-TMPSCRIPT="$(mktemp /tmp/rodeochecker_launcher_XXXX.applescript)"
+TMPSCRIPT="$(mktemp -t rodeochecker_launcher).applescript"
 # Embed python and script paths as literal strings inside the AppleScript.
 # Single-quote them in the shell command so spaces in paths are handled.
 cat > "$TMPSCRIPT" << EOF
