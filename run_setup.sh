@@ -56,47 +56,20 @@ APP_PATH="$HOME/Desktop/Rodeo Checker.app"
 
 rm -rf "$APP_PATH"
 
-mkdir -p "$APP_PATH/Contents/MacOS"
-mkdir -p "$APP_PATH/Contents/Resources"
-
-cat > "$APP_PATH/Contents/Info.plist" << EOF
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>CFBundleName</key>
-    <string>Rodeo Checker</string>
-    <key>CFBundleDisplayName</key>
-    <string>Rodeo Checker</string>
-    <key>CFBundleIdentifier</key>
-    <string>com.rodeochecker.app</string>
-    <key>CFBundleVersion</key>
-    <string>1.0</string>
-    <key>CFBundlePackageType</key>
-    <string>APPL</string>
-    <key>CFBundleExecutable</key>
-    <string>launch</string>
-    <key>NSHighResolutionCapable</key>
-    <true/>
-</dict>
-</plist>
+# macOS Sequoia blocks shell scripts as CFBundleExecutable (-47 "damaged" error).
+# Use osacompile to produce a proper compiled AppleScript app bundle instead.
+TMPSCRIPT="$(mktemp /tmp/rodeochecker_launcher_XXXX.applescript)"
+cat > "$TMPSCRIPT" << EOF
+on run
+    do shell script ${PYTHON@Q} & " " & quoted form of "${DIR}/RodeoChecker.py" & " > /dev/null 2>&1 &"
+end run
 EOF
 
-cat > "$APP_PATH/Contents/MacOS/launch" << 'ENDOFSCRIPT'
-#!/bin/bash
-ENDOFSCRIPT
-
-cat >> "$APP_PATH/Contents/MacOS/launch" << EOF
-SCRIPT="${DIR}/RodeoChecker.py"
-PYTHON="${PYTHON}"
-EOF
-
-cat >> "$APP_PATH/Contents/MacOS/launch" << 'ENDOFSCRIPT'
-cd "$(dirname "$SCRIPT")"
-"$PYTHON" "$SCRIPT"
-ENDOFSCRIPT
-
-chmod +x "$APP_PATH/Contents/MacOS/launch"
+osacompile -o "$APP_PATH" "$TMPSCRIPT"
+rm "$TMPSCRIPT"
+# Remove stale shell script left by osacompile so the signature is clean
+rm -f "$APP_PATH/Contents/MacOS/launch"
+codesign --force --deep --sign - "$APP_PATH"
 xattr -cr "$APP_PATH" 2>/dev/null || true
 
 echo "✓ Desktop app created: 'Rodeo Checker' on your Desktop"
