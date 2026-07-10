@@ -123,8 +123,12 @@ class RodeoCheckerApp(tk.Tk):
         tk.Label(titl, text="Weekly Report Generator",
                  font=FONT_SUB, bg=CARD, fg=MUTED).pack(anchor="w")
 
-        tk.Label(hdr, text=date.today().strftime("%B %d, %Y"),
-                 font=FONT_N, bg=CARD, fg=MUTED).pack(side="right", padx=20)
+        date_frame = tk.Frame(hdr, bg=CARD)
+        date_frame.pack(side="right", padx=20)
+        tk.Label(date_frame, text=date.today().strftime("%B %d, %Y"),
+                 font=FONT_N, bg=CARD, fg=MUTED).pack(anchor="e")
+        tk.Label(date_frame, text=f"version {APP_VERSION}",
+                 font=FONT_S, bg=CARD, fg=MUTED).pack(anchor="e")
 
         # Separator
         tk.Frame(self, bg=ACCENT, height=2).pack(fill="x")
