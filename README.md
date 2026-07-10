@@ -10,7 +10,7 @@ Automated weekly tool that cross-references the rodeo entry list against the UPR
 RodeoChecker/
 ├── .github/
 │   └── workflows/
-│       └── weekly_report.yml   ← GitHub Actions: runs every Monday 8 AM CT
+│       └── weekly_report.yml   ← GitHub Actions: run manually, no fixed schedule
 ├── reference_data/
 │   ├── card_numbers.xlsx       ← UPRA member card list (update occasionally)
 │   └── suspended_list.xlsx     ← UPRA suspended list (update occasionally)
@@ -49,7 +49,7 @@ Best for running the report yourself with a GUI.
 The workflow in `.github/workflows/weekly_report.yml` runs **whenever you trigger it** — no fixed schedule.
 
 **Setup (one time):**
-1. Push this repo to GitHub (keep it private for sensitive data)
+1. Push this repo to GitHub
 2. Make sure the two reference files are committed in `reference_data/`
 
 **Each time you need a report:**
@@ -61,17 +61,19 @@ The workflow in `.github/workflows/weekly_report.yml` runs **whenever you trigge
 
 ## 📊 Report Contents
 
-The generated `Fines_Card_Verification_YYYY-MM-DD.xlsx` has three sheets:
+The generated `Fines_Card_Verification_YYYY-MM-DD.xlsx` has four sheets:
 
 | Sheet | Contents |
 |-------|----------|
-| ⚑ Summary | Stat boxes (entrants, flagged, suspended, total $) + full flagged table |
-| 📋 All Matches | Every card number and suspension match with offense and amount |
-| ✅ Fine Totals | Fines only — one row per offense, subtotal per person, grand total |
+| ⚑ Summary | Stat boxes (entrants, flagged, suspended, with/without card, total $) + full flagged table |
+| ✅ Entries With Cards | Every alpha-sheet name that matched a card number, A–Z |
+| ❌ Entries Without Cards | Every alpha-sheet name with no card number match, A–Z |
+| 💰 Fine Totals | Fines only — one row per offense, subtotal per person, grand total |
 
 ### Color Coding
 - 🔴 **Red rows** — Person matched on the Suspended List (fines owed)
-- 🟡 **Amber rows** — Person matched on Card Numbers list only
+- 🔵 **Blue rows** — Person matched on Card Numbers list only, not suspended
+- ⚪ **Grey rows** — No card match, not suspended
 - 🟦 **Navy bars** — Subtotal per person / Grand total row
 - 🟢 **Green cell** — Dollar total
 
@@ -123,4 +125,6 @@ pip install pandas openpyxl
 
 ## 🔒 Privacy Note
 
-This repo should be set to **Private** on GitHub since it contains contestant names and financial data.
+This repo is public. The contestant names, card numbers, and fine data it
+handles are already publicly available UPRA information, so no privacy
+restriction is needed here.
