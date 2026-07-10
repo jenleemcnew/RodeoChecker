@@ -22,9 +22,9 @@ jobs:
           from engine import run_match, build_excel
           alpha = sorted(Path('watched_folder').glob('*.csv'), key=lambda p: p.stat().st_mtime, reverse=True)
           alpha = alpha or sorted(Path('watched_folder').glob('*.xlsx'), key=lambda p: p.stat().st_mtime, reverse=True)
-          detail, totals, stats = run_match(str(alpha[0]), 'reference_data/card_numbers.xlsx', 'reference_data/suspended_list.xlsx')
+          person_map, with_card, without_card, fines_persons, flagged, stats = run_match(str(alpha[0]), 'reference_data/card_numbers.xlsx', 'reference_data/suspended_list.xlsx')
           os.makedirs('reports', exist_ok=True)
-          build_excel(detail, totals, stats, f'reports/Fines_Card_Verification_{date.today()}.xlsx')
+          build_excel(person_map, with_card, without_card, fines_persons, flagged, stats, f'reports/Fines_Card_Verification_{date.today()}.xlsx')
           print(stats)
           "
       - uses: actions/upload-artifact@v4
