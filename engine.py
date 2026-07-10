@@ -78,10 +78,14 @@ def load_alpha_sheet(path: str) -> pd.DataFrame:
     col_map = {}
     for c in df.columns:
         n = _norm(str(c))
-        if "RIDER LAST" in n or n == "LAST NAME":
+        if "RIDER LAST" in n or "HEADER LAST" in n or n == "LAST NAME":
             col_map["last"] = c
-        elif "RIDER FIRST" in n or n == "FIRST NAME":
+        elif "RIDER FIRST" in n or "HEADER FIRST" in n or n == "FIRST NAME":
             col_map["first"] = c
+        elif "HEELER LAST" in n:
+            col_map["heeler_last"] = c
+        elif "HEELER FIRST" in n:
+            col_map["heeler_first"] = c
         elif "CLASS" in n:
             col_map["class"] = c
         elif "ENTRY TIME" in n or "ENTRY" in n:
@@ -106,10 +110,10 @@ def load_alpha_sheet(path: str) -> pd.DataFrame:
             "role":       "Header" if is_tr else "",
         })
 
-        # For TeamRoping rows, also add the heeler from the extra positional columns
+        # For TeamRoping rows, also add the heeler (named columns take priority)
         if is_tr:
-            h_last  = _norm(str(r.get("_pos7", "")))
-            h_first = _norm(str(r.get("_pos8", "")))
+            h_last  = _norm(str(r.get(col_map.get("heeler_last",  "_pos7"), ""))) or _norm(str(r.get("_pos7", "")))
+            h_first = _norm(str(r.get(col_map.get("heeler_first", "_pos8"), ""))) or _norm(str(r.get("_pos8", "")))
             if h_last and h_last not in ("NAN", ""):
                 rows.append({
                     "key":        make_key(h_last, h_first),
